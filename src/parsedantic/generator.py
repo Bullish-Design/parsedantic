@@ -14,8 +14,12 @@ Union and more complex scenarios.
 
 from typing import Any, Dict, Iterable, List, Sequence, Tuple, TYPE_CHECKING, get_args, get_origin
 
+import logging
+
 from parsy import Parser, seq, success
 from pydantic.fields import FieldInfo
+
+logger = logging.getLogger(__name__)
 
 from .parsers import float_num, integer, pattern, whitespace
 
@@ -78,19 +82,25 @@ def _get_field_separator(model_class: type["ParsableModel"]) -> Parser[Any]:
 
     return separator
 
-
 def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, Any]]:
     """Construct a parser that produces a mapping of field values.
 
-    The resulting parser yields a :class:`dict` mapping field names to parsed
-    values. :class:`ParsableModel.parse` feeds this mapping into
+    The resulting parser yields a :class:`dict` mapping field names to
+    parsed values. :class:`ParsableModel.parse` feeds this mapping into
     ``model_validate`` to obtain a fully validated model instance.
 
     Field parsers are generated in declaration order using
     :func:`generate_field_parser`. A separator parser is inserted between
-    successive fields. By default this is a whitespace parser, but models may
-    override it via ``ParseConfig.field_separator``.
+    successive fields. By default this is a whitespace parser, but models
+    may override it via ``ParseConfig.field_separator``.
+
+    This function performs a small, per-call optimisation by caching the
+    parsers generated for each distinct field type. When multiple fields
+    share the same annotation (for example ``int``), the underlying
+    field parser is created once and then reused.
     """
+    logger.debug("Building model parser for %s", model_class.__name__)
+
     # Pydantic guarantees ``model_fields`` preserves definition order.
     field_items: Sequence[Tuple[str, FieldInfo]] = tuple(
         model_class.model_fields.items()
@@ -98,26 +108,50 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
 
     if not field_items:
         # Model with no fields – always succeeds and yields an empty mapping.
+        logger.debug("Model %s has no fields; using success({}) parser", model_class.__name__)
         return success({})
 
-    # Build a parser for each field.
+    # Build a parser for each field, reusing parsers for identical types.
     field_names: List[str] = []
     field_parsers: List[Parser[Any]] = []
+    field_type_cache: Dict[Any, Parser[Any]] = {}
+
     for name, field in field_items:
         field_names.append(name)
-        field_parsers.append(generate_field_parser(field.annotation, field))
+        field_type = field.annotation
+        parser = field_type_cache.get(field_type)
+        if parser is None:
+            logger.debug(
+                "Generating parser for field %s.%s (type=%r)",
+                model_class.__name__,
+                name,
+                field_type,
+            )
+            parser = generate_field_parser(field_type, field)
+            field_type_cache[field_type] = parser
+        else:
+            logger.debug(
+                "Reusing cached parser for field %s.%s (type=%r)",
+                model_class.__name__,
+                name,
+                field_type,
+            )
+        field_parsers.append(parser)
 
     separator = _get_field_separator(model_class)
 
-    # Interleave a separator between the field parsers. We keep only the field
-    # values by sequencing ``separator.then(parser)`` for subsequent fields.
+    # Interleave a separator between the field parsers. We keep only the
+    # field values by sequencing ``separator.then(parser)`` for
+    # subsequent fields.
     combined_parsers: List[Parser[Any]] = []
     first, *rest = field_parsers
     combined_parsers.append(first)
     for parser in rest:
         combined_parsers.append(separator.then(parser))
 
-    sequence_parser: Parser[Tuple[Any, ...]] = seq(*combined_parsers)  # type: ignore[arg-type]
+    sequence_parser: Parser[Tuple[Any, ...]] = seq(
+        *combined_parsers
+    )  # type: ignore[arg-type]
 
     def to_mapping(values: Iterable[Any]) -> Dict[str, Any]:
         return dict(zip(field_names, values))

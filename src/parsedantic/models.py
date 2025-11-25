@@ -13,8 +13,13 @@ generation is introduced in later steps.
 
 from typing import Any, ClassVar, Dict, Type, TypeVar
 
+import logging
+from threading import RLock
+
 from parsy import Parser, ParseError as ParsyParseError
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from .errors import ParseError
 from .generator import build_model_parser
@@ -33,6 +38,7 @@ class ParsableModel(BaseModel):
 
     #: Cache mapping model classes to their parser instances.
     _parser_cache: ClassVar[Dict[Type["ParsableModel"], Parser[Any]]] = {}
+    _parser_cache_lock: ClassVar[RLock] = RLock()
 
     class ParseConfig:
         """Default parsing configuration for a model.
@@ -88,16 +94,32 @@ class ParsableModel(BaseModel):
 
     @classmethod
     def _get_parser(cls: Type[SelfParsableModel]) -> Parser[Any]:
-        """Return the cached parser for *cls*, building it on first use.
+        """Return a cached parser for *cls*, building it on first use.
 
-        Subclasses normally do not override this; they instead provide an
-        implementation of :meth:`_build_parser`.
+        The parser is cached per concrete subclass to avoid the overhead of
+        regenerating parsers on every :meth:`parse` call. This method is
+        thread-safe and emits debug logs indicating whether a cached parser
+        was used or a new one was built.
         """
-        parser = cls._parser_cache.get(cls)
-        if parser is None:
-            parser = cls._build_parser()
-            cls._parser_cache[cls] = parser
-        return parser
+        with cls._parser_cache_lock:
+            parser = cls._parser_cache.get(cls)
+            if parser is None:
+                logger.debug("Building new parser for %s", cls.__name__)
+                parser = cls._build_parser()
+                cls._parser_cache[cls] = parser
+            else:
+                logger.debug("Using cached parser for %s", cls.__name__)
+            return parser
+
+    @classmethod
+    def _clear_parser_cache(cls) -> None:
+        """Clear the cached parser for this class.
+
+        Primarily intended for tests and benchmarks where parser construction
+        needs to be forced on subsequent calls.
+        """
+        with cls._parser_cache_lock:
+            cls._parser_cache.pop(cls, None)
 
     @classmethod
     def _build_parser(cls: Type[SelfParsableModel]) -> Parser[Any]:
