@@ -29,6 +29,28 @@ if TYPE_CHECKING:  # pragma: no cover - import only for typing
     from .models import ParsableModel
 
 
+def is_parsable_model(field_type: Any) -> bool:
+    """Return ``True`` if *field_type* is a :class:`ParsableModel` subclass.
+
+    The check is intentionally defensive so that it behaves sensibly when
+    presented with non-class annotations such as ``list[int]`` or ``Union``.
+    The ``ParsableModel`` import is local to avoid import-time cycles between
+    :mod:`parsedantic.models` and :mod:`parsedantic.generator`.
+    """
+    try:
+        from .models import ParsableModel  # local import to avoid circular import
+    except Exception:  # pragma: no cover - extremely defensive
+        return False
+
+    if not isinstance(field_type, type):
+        return False
+
+    try:
+        return issubclass(field_type, ParsableModel)
+    except TypeError:
+        return False
+
+
 def is_optional_type(field_type: Any) -> Tuple[bool, Any | None]:
     """Detect ``Optional[T]`` / ``T | None`` annotations.
 
@@ -184,6 +206,23 @@ def generate_field_parser(
             return metadata.parser
         if metadata.pattern is not None:
             return pattern(metadata.pattern)
+
+    # Nested ``ParsableModel`` fields compose by delegating to the nested
+    # model's own parser. The nested parser typically yields a ``dict`` of
+    # field values which we feed back through ``model_validate`` to obtain a
+    # fully validated instance of the nested model.
+    if is_parsable_model(field_type):
+        nested_model_type = field_type
+
+        def _to_nested_model(value: Any) -> Any:
+            # If the nested parser already produced a model instance we simply
+            # return it; otherwise we validate the parsed mapping.
+            if isinstance(value, nested_model_type):
+                return value
+            return nested_model_type.model_validate(value)
+
+        nested_parser: Parser[Any] = nested_model_type._get_parser()
+        return nested_parser.map(_to_nested_model)
 
     # Optional types delegate to their inner annotation. Optional behaviour
     # such as strict/lenient handling is decided at model-parser level.

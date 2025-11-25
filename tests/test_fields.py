@@ -56,7 +56,6 @@ def test_parsefield_rejects_both_pattern_and_parser() -> None:
     with pytest.raises(ValueError):
         ParseField(pattern=r"\d+", parser=literal("x"))
 
-
 def test_parsefield_pattern_compiles_and_overrides_type() -> None:
     """ParseField(pattern=...) should drive the field parser.
 
@@ -76,15 +75,17 @@ def test_parsefield_pattern_compiles_and_overrides_type() -> None:
         parser.parse("abc")
 
 
+
 def test_parsefield_sep_by_requires_list_field() -> None:
     """Using ``sep_by`` on a non-list field is a configuration error."""
 
     class Model(ParsableModel):
-        value: int = ParseField(pattern=r"[^,]+", sep_by=literal(","))
+        value: int = ParseField(sep_by=literal(","))
 
     field_info = Model.model_fields["value"]
     with pytest.raises(TypeError):
         generate_field_parser(field_info.annotation, field_info)
+
 
 
 def test_parsefield_sep_by_for_list_of_strings() -> None:
@@ -106,6 +107,7 @@ def test_parsefield_sep_by_for_list_of_strings() -> None:
     assert result.values == ["a", "b", "c"]
 
 
+
 def test_parsefield_sep_by_with_pattern_separator_for_ints() -> None:
     """Separator may be an arbitrary parser, typically a regex pattern."""
 
@@ -125,6 +127,7 @@ def test_parsefield_sep_by_with_pattern_separator_for_ints() -> None:
     assert result.nums == [1, 2, 3]
 
 
+
 def test_parsefield_pattern_and_sep_by_for_mixed_model() -> None:
     """Pattern controls list elements while ``sep_by`` separates them."""
 
@@ -135,3 +138,4 @@ def test_parsefield_pattern_and_sep_by_for_mixed_model() -> None:
     result = MixedModel.parse("10 foo bar baz")
     assert result.id == 10
     assert result.tags == ["foo", "bar", "baz"]
+
