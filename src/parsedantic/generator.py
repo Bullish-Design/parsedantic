@@ -12,19 +12,7 @@ including configurable strict/lenient handling via ``ParseConfig``.
 """
 
 from types import NoneType, UnionType
-from typing import (
-    Any,
-    Dict,
-    Iterable,
-    List,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-    Literal,
-    get_args,
-    get_origin,
-)
+from typing import Any, Dict, Iterable, List, Sequence, Tuple, TYPE_CHECKING, Union, Literal, get_args, get_origin
 
 import logging
 
@@ -68,7 +56,6 @@ def is_optional_type(field_type: Any) -> Tuple[bool, Any | None]:
 
     return False, None
 
-
 def is_list_type(field_type: Any) -> Tuple[bool, Any | None]:
     """Detect ``list[T]`` style annotations.
 
@@ -108,8 +95,14 @@ def is_union_type(field_type: Any) -> Tuple[bool, Tuple[Any, ...]]:
     return True, members
 
 
-def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]:
-    r"""Generate a parsy :class:`Parser` for a single field.
+
+def generate_field_parser(
+    field_type: Any,
+    field_info: FieldInfo,
+    *,
+    _ignore_sep_by: bool = False,
+) -> Parser[Any]:
+    """Generate a parsy :class:`Parser` for a single field.
 
     Currently this supports a small subset of Python types:
 
@@ -133,24 +126,64 @@ def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]
     Raises:
         NotImplementedError: If the type is not yet supported by the
             type-driven machinery.
-        TypeError: For malformed list types (e.g. bare ``list``).
+        TypeError: For malformed list types (e.g. bare ``list``) or invalid
+            ParseField configuration.
     """
-    # Allow explicit ParseField metadata to override type-driven generation.
     metadata = get_parsefield_metadata(field_info)
-    if metadata is not None and metadata.parser is not None:
-        return metadata.parser
+
+    # Validate ``sep_by`` usage early so we give a clear error message when it
+    # is applied to non-list fields.
+    is_list, element_type = is_list_type(field_type)
+    if (
+        metadata is not None
+        and metadata.sep_by is not None
+        and not is_list
+        and not _ignore_sep_by
+    ):
+        raise TypeError("ParseField(sep_by=...) requires a list[...] field")
 
     # Lists are handled first so that ``list[Optional[T]]`` is treated as a
     # collection of optional values rather than an optional list.
-    is_list, element_type = is_list_type(field_type)
     if is_list:
         if element_type is None:
             raise TypeError("List fields must specify an element type, e.g. list[int]")
-        # Element parsers are generated recursively so that list element types
-        # can themselves be complex (unions, nested lists in future steps,
-        # etc.). Elements are separated by the standard whitespace parser.
-        element_parser = generate_field_parser(element_type, field_info)
+
+        # Determine the element parser. Explicit ParseField configuration takes
+        # precedence over type-driven generation.
+        if metadata is not None:
+            if metadata.parser is not None:
+                element_parser: Parser[Any] = metadata.parser
+            elif metadata.pattern is not None:
+                element_parser = pattern(metadata.pattern)
+            else:
+                element_parser = generate_field_parser(
+                    element_type,
+                    field_info,
+                    _ignore_sep_by=True,
+                )
+        else:
+            element_parser = generate_field_parser(
+                element_type,
+                field_info,
+                _ignore_sep_by=True,
+            )
+
+        # When ``sep_by`` is supplied we build a separated-list parser. When
+        # called with ``_ignore_sep_by`` the caller is responsible for adding
+        # any list-level behaviour.
+        if metadata is not None and metadata.sep_by is not None and not _ignore_sep_by:
+            return element_parser.sep_by(metadata.sep_by)
+
+        # Default list behaviour: whitespace-separated elements.
         return element_parser.sep_by(whitespace())
+
+    # At this point the field is not a list. Explicit ParseField configuration
+    # can still override the type-driven logic.
+    if metadata is not None:
+        if metadata.parser is not None:
+            return metadata.parser
+        if metadata.pattern is not None:
+            return pattern(metadata.pattern)
 
     # Optional types delegate to their inner annotation. Optional behaviour
     # such as strict/lenient handling is decided at model-parser level.
@@ -167,7 +200,8 @@ def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]
         if not members:
             raise TypeError("Union types must specify at least one non-None member")
         parsers: List[Parser[Any]] = [
-            generate_field_parser(member, field_info) for member in members
+            generate_field_parser(member, field_info, _ignore_sep_by=_ignore_sep_by)
+            for member in members
         ]
         combined = parsers[0]
         for alt in parsers[1:]:
@@ -316,10 +350,11 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
 
         combined_parsers.append(combined)
 
-    sequence_parser: Parser[Tuple[Any, ...]] = seq(*combined_parsers)  # type: ignore[arg-type]
+    sequence_parser: Parser[Tuple[Any, ...]] = seq(
+        *combined_parsers
+    )  # type: ignore[arg-type]
 
     def to_mapping(values: Iterable[Any]) -> Dict[str, Any]:
         return dict(zip(field_names, values))
 
     return sequence_parser.map(to_mapping)
-
