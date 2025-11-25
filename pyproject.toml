@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling>=1.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "parsedantic"
+version = "0.1.0"
+description = "Pydantic-native wrapper for parsy parser combinators."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pydantic>=2.10",
+    "parsy>=2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.8",
+    "ruff>=0.1",
+]
+
+#[tool.uv.scripts]
+#test = "pytest"
+#lint = "ruff check"
+#format = "ruff format"
+#typecheck = "mypy src/"
