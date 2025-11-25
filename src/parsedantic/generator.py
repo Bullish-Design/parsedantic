@@ -24,6 +24,7 @@ from typing import (
     Literal,
     get_args,
     get_origin,
+    get_type_hints,
 )
 
 import logging
@@ -297,6 +298,16 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
     """Construct a parser that produces a mapping of field values."""
     logger.debug("Building model parser for %s", model_class.__name__)
 
+    try:
+        type_hints = get_type_hints(model_class)
+    except NameError as exc:
+        raise TypeError(
+            f"Unresolved forward reference in annotations for "
+            f"{model_class.__name__}: {exc}"
+        ) from exc
+    except TypeError:
+        type_hints = {}
+
     field_items: Sequence[Tuple[str, FieldInfo]] = tuple(
         model_class.model_fields.items()
     )
@@ -318,7 +329,7 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
     optional_kinds: List[str] = []  # "none", "strict", "lenient"
 
     for name, field_info in field_items:
-        field_type = field_info.annotation
+        field_type = type_hints.get(name, field_info.annotation)
         is_opt, inner = is_optional_type(field_type)
         if is_opt and inner is not None:
             base_type = inner

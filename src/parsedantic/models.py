@@ -16,7 +16,7 @@ from typing import Any, ClassVar, Dict, Type, TypeVar
 import logging
 from threading import RLock
 
-from parsy import Parser, ParseError as ParsyParseError
+from parsy import Parser, ParseError as ParsyParseError, forward_declaration
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -100,16 +100,41 @@ class ParsableModel(BaseModel):
         regenerating parsers on every :meth:`parse` call. This method is
         thread-safe and emits debug logs indicating whether a cached parser
         was used or a new one was built.
+
+        For recursive models we use :func:`parsy.forward_declaration` so that
+        nested references to the same model (or mutually recursive models)
+        can obtain a placeholder parser while the real parser is being built.
         """
+        placeholder: Parser[Any] | None = None
         with cls._parser_cache_lock:
             parser = cls._parser_cache.get(cls)
             if parser is None:
                 logger.debug("Building new parser for %s", cls.__name__)
-                parser = cls._build_parser()
-                cls._parser_cache[cls] = parser
+                placeholder = forward_declaration()
+                cls._parser_cache[cls] = placeholder
             else:
                 logger.debug("Using cached parser for %s", cls.__name__)
-            return parser
+                return parser
+
+        # Build the real parser outside the lock
+        built = cls._build_parser()
+
+        with cls._parser_cache_lock:
+            current = cls._parser_cache.get(cls)
+            # If the cache still contains our placeholder, finalise it.
+            if placeholder is not None and current is placeholder:
+                placeholder.become(built)
+                cls._parser_cache[cls] = built
+                return built
+
+            # Another thread may have populated the cache while we built.
+            # In that case, prefer the cached instance.
+            if current is not None:
+                return current
+
+            # Fallback: store and return the built parser.
+            cls._parser_cache[cls] = built
+            return built
 
     @classmethod
     def _clear_parser_cache(cls) -> None:
