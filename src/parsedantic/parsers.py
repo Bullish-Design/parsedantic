@@ -19,7 +19,10 @@ def literal(text: str) -> Parser[str]:
         >>> literal("hello").parse("hello")
         'hello'
     """
-    return string(text)
+    parser = string(text)
+    # Store the literal value for extraction by generator code
+    parser._literal_value = text  # type: ignore[attr-defined]
+    return parser
 
 
 def pattern(regex_pattern: str) -> Parser[str]:

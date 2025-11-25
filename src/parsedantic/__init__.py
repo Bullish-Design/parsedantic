@@ -3,15 +3,17 @@ from __future__ import annotations
 
 """Parsedantic package root.
 
-This module defines the public API surface exposed to users. At Step 4 the
-surface is intentionally small: it includes the core :class:`ParsableModel`
-base class, the :class:`ParseError` type used for parse failures, and the
+This module defines the public API surface exposed to users. By Step 13 the
+surface includes the core :class:`ParsableModel` base class, the
+:class:`ParseError` type used for parse failures, the :class:`ParseField`
+helper for per-field parser customisation, configuration helpers, and the
 primitive parser builder functions.
 """
 
 from .errors import ParseError
 from .models import ParsableModel
 from .fields import ParseField
+from .config import ParseConfig
 from .generator import build_model_parser, generate_field_parser
 from .parsers import (
     any_char,
@@ -27,6 +29,7 @@ __all__: list[str] = [
     "ParsableModel",
     "ParseError",
     "ParseField",
+    "ParseConfig",
     "build_model_parser",
     "generate_field_parser",
     "literal",

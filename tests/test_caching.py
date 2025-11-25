@@ -119,7 +119,9 @@ def test_build_model_parser_reuses_field_parsers(monkeypatch) -> None:
     call_count = 0
     original = generate_field_parser
 
-    def counting_generate_field_parser(field_type: Any, field_info: Any) -> Parser[Any]:
+    def counting_generate_field_parser(
+        field_type: Any, field_info: Any, **kwargs: Any
+    ) -> Parser[Any]:
         nonlocal call_count
         call_count += 1
         return original(field_type, field_info)

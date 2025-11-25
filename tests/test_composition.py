@@ -102,10 +102,14 @@ def test_list_of_nested_models_parses_sequence() -> None:
         name: str
         value: int
 
+        class ParseConfig:
+            # Use a distinct separator so list parsing remains unambiguous.
+            field_separator = literal("=")
+
     class Container(ParsableModel):
         items: list[Item]
 
-    result = Container.parse("foo 1 bar 2 baz 3")
+    result = Container.parse("foo=1 bar=2 baz=3")
     assert len(result.items) == 3
     assert [item.name for item in result.items] == ["foo", "bar", "baz"]
     assert [item.value for item in result.items] == [1, 2, 3]
