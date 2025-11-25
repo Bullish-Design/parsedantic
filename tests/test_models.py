@@ -181,6 +181,35 @@ def test_type_driven_parsing_with_field_separator() -> None:
     assert record.b == 20
 
 
+
+
+def test_optional_type_strict_mode_in_models() -> None:
+    """Optional field should raise on invalid value when strict."""
+
+    class Model(ParsableModel):
+        required: str
+        optional: int | None
+
+        class ParseConfig:
+            strict_optional = True
+
+    with pytest.raises(ParseError):
+        Model.parse("text notanint")
+
+
+def test_optional_type_lenient_mode_in_models() -> None:
+    """Optional field should yield ``None`` on invalid value when lenient."""
+
+    class Model(ParsableModel):
+        required: str
+        optional: int | None
+
+        class ParseConfig:
+            strict_optional = False
+
+    result = Model.parse("text notanint")
+    assert result.required == "text"
+    assert result.optional is None
 def test_type_driven_parse_failure_raises_parseerror() -> None:
     """Invalid input should raise our :class:`ParseError` via ``parse``."""
 
