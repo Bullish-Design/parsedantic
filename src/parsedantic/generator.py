@@ -58,6 +58,27 @@ def extract_optional_inner_type(field_type: Any) -> Any:
     return inner
 
 
+def is_list_type(field_type: Any) -> Tuple[bool, Any | None]:
+    """Detect ``list[T]`` style annotations.
+
+    Returns a ``(is_list, element_type)`` pair where ``element_type`` is the
+    inner ``T`` for parameterised lists, or ``None`` for bare ``list`` which
+    is considered an error by :func:`generate_field_parser`.
+    """
+    origin = get_origin(field_type)
+
+    if origin is list or origin is List:
+        args = get_args(field_type)
+        if not args:
+            return True, None
+        return True, args[0]
+
+    if field_type is list or field_type is List:
+        return True, None
+
+    return False, None
+
+
 def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]:
     """Generate a parsy :class:`Parser` for a single field.
 
@@ -66,6 +87,7 @@ def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]
     * ``str`` -> non-whitespace token (``pattern(r"\\S+")``)
     * ``int`` -> integer parser (including negatives)
     * ``float`` -> floating point parser
+    * ``list[T]`` -> parser for repeated ``T`` values
     * ``Optional[T]`` / ``T | None`` -> delegated to inner ``T``
 
     Args:
@@ -80,7 +102,20 @@ def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]
     Raises:
         NotImplementedError: If the type is not yet supported by the
             type-driven machinery.
+        TypeError: For malformed list types (e.g. bare ``list``).
     """
+    # Lists are handled first so that ``list[Optional[T]]`` is treated as a
+    # collection of optional values rather than an optional list.
+    is_list, element_type = is_list_type(field_type)
+    if is_list:
+        if element_type is None:
+            raise TypeError("List fields must specify an element type, e.g. list[int]")
+        # Element parsers are generated recursively so that list element types
+        # can themselves be complex (unions, nested lists in future steps,
+        # etc.). Elements are separated by the standard whitespace parser.
+        element_parser = generate_field_parser(element_type, field_info)
+        return element_parser.sep_by(whitespace())
+
     # Optional types delegate to their inner annotation. Optional behaviour
     # such as strict/lenient handling is decided at model-parser level.
     is_opt, inner = is_optional_type(field_type)
@@ -99,7 +134,6 @@ def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]
     raise NotImplementedError(
         f"Automatic parser generation not implemented for type {field_type!r}"
     )
-
 
 def _get_field_separator(model_class: type["ParsableModel"]) -> Parser[Any]:
     """Return the parser to use between successive fields.
