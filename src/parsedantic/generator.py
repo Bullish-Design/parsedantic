@@ -12,7 +12,7 @@ including configurable strict/lenient handling via ``ParseConfig``.
 """
 
 from types import NoneType, UnionType
-from typing import Any, Dict, Iterable, List, Sequence, Tuple, TYPE_CHECKING, Union, get_args, get_origin
+from typing import Any, Dict, Iterable, List, Sequence, Tuple, TYPE_CHECKING, Union, Literal, get_args, get_origin
 
 import logging
 
@@ -21,7 +21,7 @@ from pydantic.fields import FieldInfo
 
 logger = logging.getLogger(__name__)
 
-from .parsers import float_num, integer, pattern, whitespace
+from .parsers import float_num, integer, literal, pattern, whitespace
 
 if TYPE_CHECKING:  # pragma: no cover - import only for typing
     from .models import ParsableModel
@@ -31,7 +31,12 @@ def is_optional_type(field_type: Any) -> Tuple[bool, Any | None]:
     """Detect ``Optional[T]`` / ``T | None`` annotations.
 
     Returns a ``(is_optional, inner_type)`` pair where ``inner_type`` is the
-    non-``None`` member for recognised optional types.
+    non-``None`` member (or members) for recognised optional types.
+
+    This helper is intentionally a little more general than ``Optional[T]``:
+    any ``Union`` that includes ``None`` is treated as an optional union of the
+    remaining members. For example ``int | str | None`` is considered
+    ``Optional[int | str]``.
     """
     origin = get_origin(field_type)
     if origin not in (Union, UnionType):
@@ -41,8 +46,12 @@ def is_optional_type(field_type: Any) -> Tuple[bool, Any | None]:
     non_none_args = [arg for arg in args if arg is not NoneType]
     none_count = len(args) - len(non_none_args)
 
-    if none_count == 1 and len(non_none_args) == 1:
-        return True, non_none_args[0]
+    if none_count >= 1 and non_none_args:
+        if len(non_none_args) == 1:
+            return True, non_none_args[0]
+        # Rebuild a Union of the non-None members so that later logic can
+        # continue to treat the inner type as a normal Union.
+        return True, Union[tuple(non_none_args)]
 
     return False, None
 
@@ -77,6 +86,24 @@ def is_list_type(field_type: Any) -> Tuple[bool, Any | None]:
         return True, None
 
     return False, None
+
+
+def is_union_type(field_type: Any) -> Tuple[bool, Tuple[Any, ...]]:
+    """Detect ``Union[A, B]`` / ``A | B`` annotations (excluding ``None``).
+
+    ``None`` members are excluded because they are handled by
+    :func:`is_optional_type`. The returned tuple contains only the
+    non-``None`` member types in declaration order.
+    """
+    origin = get_origin(field_type)
+    if origin not in (Union, UnionType):
+        return False, ()
+
+    members = tuple(arg for arg in get_args(field_type) if arg is not NoneType)
+    if not members:
+        return False, ()
+
+    return True, members
 
 
 def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]:
@@ -122,7 +149,35 @@ def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]
     if is_opt and inner is not None:
         field_type = inner
 
+    # Union types (including optional unions whose inner type is a Union)
+    # are handled by generating parsers for each member and combining them
+    # using parsy's ``|`` operator. Order is significant: the first parser
+    # that succeeds wins.
+    is_union, members = is_union_type(field_type)
+    if is_union:
+        if not members:
+            raise TypeError("Union types must specify at least one non-None member")
+        parsers = [generate_field_parser(member, field_info) for member in members]
+        combined = parsers[0]
+        for alt in parsers[1:]:
+            combined = combined | alt
+        return combined
+
     origin = get_origin(field_type) or field_type
+
+    if origin is Literal:
+        literal_values = get_args(field_type)
+        if not literal_values:
+            raise TypeError("Literal[...] must specify at least one value")
+        first, *rest = literal_values
+        if not isinstance(first, str) or any(not isinstance(v, str) for v in rest):
+            raise NotImplementedError(
+                "Literal types are currently supported only for string values"
+            )
+        lit_parser: Parser[str] = literal(first)
+        for value in rest:
+            lit_parser = lit_parser | literal(value)
+        return lit_parser  # type: ignore[return-value]
 
     if origin is str:
         return pattern(r"\S+")  # single non-whitespace token
