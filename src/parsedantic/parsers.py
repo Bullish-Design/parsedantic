@@ -35,9 +35,7 @@ def pattern(regex_pattern: str) -> Parser[str]:
 def integer() -> Parser[int]:
     r"""Return a parser that parses a signed base-10 integer.
 
-    The accepted pattern is ``-?\d+`` but will not match if followed by
-    a decimal point or scientific notation marker (to avoid partial
-    matches of float literals in union contexts).
+    The accepted pattern is ``-?\d+`` and the result is mapped to ``int``.
     """
     return regex(r"-?\d+(?![.eE])").map(int)
 

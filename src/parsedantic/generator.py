@@ -12,7 +12,19 @@ including configurable strict/lenient handling via ``ParseConfig``.
 """
 
 from types import NoneType, UnionType
-from typing import Any, Dict, Iterable, List, Sequence, Tuple, TYPE_CHECKING, Union, Literal, get_args, get_origin
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Sequence,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+    Literal,
+    get_args,
+    get_origin,
+)
 
 import logging
 
@@ -33,8 +45,7 @@ def is_optional_type(field_type: Any) -> Tuple[bool, Any | None]:
     Returns a ``(is_optional, inner_type)`` pair where ``inner_type`` is the
     non-``None`` member (or members) for recognised optional types.
 
-    This helper is intentionally a little more general than ``Optional[T]``:
-    any ``Union`` that includes ``None`` is treated as an optional union of the
+    Any ``Union`` that includes ``None`` is treated as an optional of the
     remaining members. For example ``int | str | None`` is considered
     ``Optional[int | str]``.
     """
@@ -54,17 +65,6 @@ def is_optional_type(field_type: Any) -> Tuple[bool, Any | None]:
         return True, Union[tuple(non_none_args)]
 
     return False, None
-
-
-def extract_optional_inner_type(field_type: Any) -> Any:
-    """Return the inner ``T`` from ``Optional[T]`` / ``T | None``.
-
-    Raises ``TypeError`` if *field_type* is not recognised as optional.
-    """
-    is_opt, inner = is_optional_type(field_type)
-    if not is_opt or inner is None:
-        raise TypeError(f"{field_type!r} is not an Optional type")
-    return inner
 
 
 def is_list_type(field_type: Any) -> Tuple[bool, Any | None]:
@@ -92,8 +92,8 @@ def is_union_type(field_type: Any) -> Tuple[bool, Tuple[Any, ...]]:
     """Detect ``Union[A, B]`` / ``A | B`` annotations (excluding ``None``).
 
     ``None`` members are excluded because they are handled by
-    :func:`is_optional_type`. The returned tuple contains only the
-    non-``None`` member types in declaration order.
+    :func:`is_optional_type`. The returned tuple contains only the non-``None``
+    member types in declaration order.
     """
     origin = get_origin(field_type)
     if origin not in (Union, UnionType):
@@ -107,15 +107,17 @@ def is_union_type(field_type: Any) -> Tuple[bool, Tuple[Any, ...]]:
 
 
 def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]:
-    """Generate a parsy :class:`Parser` for a single field.
+    r"""Generate a parsy :class:`Parser` for a single field.
 
     Currently this supports a small subset of Python types:
 
-    * ``str`` -> non-whitespace token (``pattern(r"\\S+")``)
+    * ``str`` -> non-whitespace token (``pattern(r"\S+")``)
     * ``int`` -> integer parser (including negatives)
     * ``float`` -> floating point parser
     * ``list[T]`` -> parser for repeated ``T`` values
     * ``Optional[T]`` / ``T | None`` -> delegated to inner ``T``
+    * ``Union[A, B]`` / ``A | B`` -> ordered alternatives
+    * ``Literal[... ]`` -> string literal values
 
     Args:
         field_type: The annotation associated with the field.
@@ -149,15 +151,17 @@ def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]
     if is_opt and inner is not None:
         field_type = inner
 
-    # Union types (including optional unions whose inner type is a Union)
-    # are handled by generating parsers for each member and combining them
-    # using parsy's ``|`` operator. Order is significant: the first parser
-    # that succeeds wins.
+    # Union types (including optional unions whose inner type is a Union) are
+    # handled by generating parsers for each member and combining them using
+    # parsy's ``|`` operator. Order is significant: the first parser that
+    # succeeds without consuming input on failure wins.
     is_union, members = is_union_type(field_type)
     if is_union:
         if not members:
             raise TypeError("Union types must specify at least one non-None member")
-        parsers = [generate_field_parser(member, field_info) for member in members]
+        parsers: List[Parser[Any]] = [
+            generate_field_parser(member, field_info) for member in members
+        ]
         combined = parsers[0]
         for alt in parsers[1:]:
             combined = combined | alt
@@ -189,6 +193,7 @@ def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]
     raise NotImplementedError(
         f"Automatic parser generation not implemented for type {field_type!r}"
     )
+
 
 def _get_field_separator(model_class: type["ParsableModel"]) -> Parser[Any]:
     """Return the parser to use between successive fields.
@@ -304,11 +309,10 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
 
         combined_parsers.append(combined)
 
-    sequence_parser: Parser[Tuple[Any, ...]] = seq(
-        *combined_parsers
-    )  # type: ignore[arg-type]
+    sequence_parser: Parser[Tuple[Any, ...]] = seq(*combined_parsers)  # type: ignore[arg-type]
 
     def to_mapping(values: Iterable[Any]) -> Dict[str, Any]:
         return dict(zip(field_names, values))
 
     return sequence_parser.map(to_mapping)
+
