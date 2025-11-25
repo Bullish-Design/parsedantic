@@ -23,14 +23,14 @@ class ParseError(Exception):
     column: int
 
     def __init__(self, text: str, index: int, expected: str) -> None:
-        # Manual init instead of the dataclass-generated one so we can derive line/column.
+        # Manual init instead of dataclass-generated one so we can derive line/column.
         self.text = text
         self.index = index
         self.expected = expected
         self.line, self.column = get_line_column(text, index)
-        # Do not call super().__init__(str(self)) here; that interacts badly with
-        # dataclass(slots=True) + Exception on newer Python versions.
-        # String representation is fully handled by __str__.
+        # We intentionally do not call ``super().__init__`` with a message here.
+        # The string representation is fully controlled by ``__str__`` below and
+        # tests rely only on that.
         Exception.__init__(self)
 
     def __str__(self) -> str:  # pragma: no cover - behaviour tested via tests
@@ -46,7 +46,7 @@ def get_line_column(text: str, index: int) -> tuple[int, int]:
     """Translate a character index into one-based (line, column).
 
     The index is clamped into the valid range ``[0, len(text)]``. Lines and columns are
-    both one-based, and line breaks are recognised as ``\"\\n\"`` characters.
+    both one-based, and line breaks are recognised as ``"\n"`` characters.
     """
     if index < 0:
         index = 0
@@ -76,7 +76,7 @@ def _get_context_line(text: str, line: int) -> str:
         return ""
 
     lines = text.splitlines()
-    # splitlines discards trailing newline characters, which is fine for context.
+    # ``splitlines`` discards trailing newline characters, which is fine for context.
     if 1 <= line <= len(lines):
         return lines[line - 1]
     return ""
