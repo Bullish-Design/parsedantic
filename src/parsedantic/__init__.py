@@ -11,6 +11,7 @@ primitive parser builder functions.
 
 from .errors import ParseError
 from .models import ParsableModel
+from .fields import ParseField
 from .generator import build_model_parser, generate_field_parser
 from .parsers import (
     any_char,
@@ -25,6 +26,7 @@ from .parsers import (
 __all__: list[str] = [
     "ParsableModel",
     "ParseError",
+    "ParseField",
     "build_model_parser",
     "generate_field_parser",
     "literal",

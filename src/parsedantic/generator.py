@@ -34,6 +34,8 @@ from pydantic.fields import FieldInfo
 logger = logging.getLogger(__name__)
 
 from .parsers import float_num, integer, literal, pattern, whitespace
+from .fields import get_parsefield_metadata
+
 
 if TYPE_CHECKING:  # pragma: no cover - import only for typing
     from .models import ParsableModel
@@ -133,6 +135,11 @@ def generate_field_parser(field_type: Any, field_info: FieldInfo) -> Parser[Any]
             type-driven machinery.
         TypeError: For malformed list types (e.g. bare ``list``).
     """
+    # Allow explicit ParseField metadata to override type-driven generation.
+    metadata = get_parsefield_metadata(field_info)
+    if metadata is not None and metadata.parser is not None:
+        return metadata.parser
+
     # Lists are handled first so that ``list[Optional[T]]`` is treated as a
     # collection of optional values rather than an optional list.
     is_list, element_type = is_list_type(field_type)
