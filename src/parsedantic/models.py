@@ -73,7 +73,9 @@ class ParsableModel(BaseModel):
         parser = cls._get_parser()
         try:
             parsed_data = parser.parse(text)
-        except ParsyParseError as exc:  # pragma: no cover - behaviour via ParseError tests
+        except (
+            ParsyParseError
+        ) as exc:  # pragma: no cover - behaviour via ParseError tests
             # ``ParseError`` expects the original text, a character index and an
             # expected-description string. parsy's ``ParseError`` exposes
             # ``index`` and ``expected`` attributes; we fall back gracefully if

@@ -306,6 +306,8 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
             f"{model_class.__name__}: {exc}"
         ) from exc
     except TypeError:
+        # Some exotic model definitions may not cooperate with get_type_hints;
+        # fall back to using FieldInfo.annotation directly.
         type_hints = {}
 
     field_items: Sequence[Tuple[str, FieldInfo]] = tuple(
@@ -330,6 +332,7 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
 
     for name, field_info in field_items:
         field_type = type_hints.get(name, field_info.annotation)
+
         is_opt, inner = is_optional_type(field_type)
         if is_opt and inner is not None:
             base_type = inner
@@ -386,4 +389,5 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
         return dict(zip(field_names, values))
 
     return sequence_parser.map(to_mapping)
+
 
