@@ -14,6 +14,7 @@ import pytest
 from parsy import string
 from pydantic import BaseModel, ValidationError
 
+from parsedantic import literal
 from parsedantic.errors import ParseError
 from parsedantic.models import ParsableModel
 
@@ -145,3 +146,47 @@ def test_parsablemodel_satisfies_pydantic_basemodel_behaviour() -> None:
     direct = Model(value=5)
     assert isinstance(direct, BaseModel)
     assert direct.value == 5
+
+
+def test_type_driven_parsing_simple_model() -> None:
+    """Models with basic annotations should parse using type-driven generation."""
+
+    class Model(ParsableModel):
+        text: str
+        count: int
+        value: float
+
+    ParsableModel._parser_cache.clear()
+    model = Model.parse("hello 3 3.5")
+    assert isinstance(model, Model)
+    assert model.text == "hello"
+    assert model.count == 3
+    assert model.value == 3.5
+
+
+def test_type_driven_parsing_with_field_separator() -> None:
+    """Type-driven parsing should honour ``ParseConfig.field_separator``."""
+
+    class CsvRecord(ParsableModel):
+        a: int
+        b: int
+
+        class ParseConfig:
+            field_separator = literal(",")
+
+    ParsableModel._parser_cache.clear()
+    record = CsvRecord.parse("10,20")
+    assert isinstance(record, CsvRecord)
+    assert record.a == 10
+    assert record.b == 20
+
+
+def test_type_driven_parse_failure_raises_parseerror() -> None:
+    """Invalid input should raise our :class:`ParseError` via ``parse``."""
+
+    class Model(ParsableModel):
+        value: int
+
+    ParsableModel._parser_cache.clear()
+    with pytest.raises(ParseError):
+        Model.parse("not-an-int")

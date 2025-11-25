@@ -17,6 +17,7 @@ from parsy import Parser, ParseError as ParsyParseError
 from pydantic import BaseModel
 
 from .errors import ParseError
+from .generator import build_model_parser
 
 SelfParsableModel = TypeVar("SelfParsableModel", bound="ParsableModel")
 
@@ -102,13 +103,8 @@ class ParsableModel(BaseModel):
     def _build_parser(cls: Type[SelfParsableModel]) -> Parser[Any]:
         """Build a parsy ``Parser`` for *cls*.
 
-        Step 4 only defines the skeleton; concrete parser generation is added
-        in Step 5. Subclasses may override this method to provide custom
-        parsers directly.
+        The default implementation delegates to :func:`build_model_parser`,
+        which uses type annotations (and later, ``ParseField`` metadata) to
+        construct a parser for the model.
         """
-        msg = (
-            "Parser generation for ParsableModel subclasses is not implemented yet. "
-            "Override ``_build_parser`` on the model class or implement "
-            "generator-based construction in later steps."
-        )
-        raise NotImplementedError(msg)
+        return build_model_parser(cls)
