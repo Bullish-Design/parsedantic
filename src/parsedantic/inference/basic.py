@@ -5,6 +5,8 @@ from typing import Any
 
 from ..core.parser import Parser
 from ..primitives import float_num, integer, string_of
+# from .container import infer_parser #as infer_container
+# from ..types import extract_parser
 
 
 def infer_parser(annotation: Any) -> Parser | None:
@@ -19,11 +21,14 @@ def infer_parser(annotation: Any) -> Parser | None:
 
 
 def get_parser_for_field(annotation: Any) -> Parser | None:
-    """Get parser with priority: Parsed[] > inferred."""
+    """Get parser for a field annotation with priority handling."""
     from ..types import extract_parser
-
+    
+    # Check for explicit Parsed[T, parser] annotation
     explicit = extract_parser(annotation)
     if explicit is not None:
         return explicit
-
-    return infer_parser(annotation)
+    
+    # Use container inference (which includes basic types as fallback)
+    from .container import infer_parser as infer_container
+    return infer_container(annotation)

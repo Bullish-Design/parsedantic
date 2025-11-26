@@ -17,7 +17,7 @@ def serialize_model(model: "ParsableModel") -> str:
     except Exception:  # pragma: no cover - fallback for unusual cases
         hints = getattr(model_cls, "__annotations__", {})
 
-    fields = model.model_fields
+    fields = model_cls.model_fields
     parts: list[str] = []
 
     for field_name, field_info in fields.items():
