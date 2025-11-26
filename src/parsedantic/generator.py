@@ -298,6 +298,10 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
     """Construct a parser that produces a mapping of field values."""
     logger.debug("Building model parser for %s", model_class.__name__)
 
+    # Resolve annotations, including forward references, against the model's
+    # module namespace. Unresolvable names should surface as a TypeError with
+    # a helpful message instead of leaking ForwardRef objects into the rest
+    # of the generator.
     try:
         type_hints = get_type_hints(model_class)
     except NameError as exc:
@@ -331,6 +335,7 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
     optional_kinds: List[str] = []  # "none", "strict", "lenient"
 
     for name, field_info in field_items:
+        # Prefer resolved type hints; fall back to the raw annotation
         field_type = type_hints.get(name, field_info.annotation)
 
         is_opt, inner = is_optional_type(field_type)
@@ -389,5 +394,3 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
         return dict(zip(field_names, values))
 
     return sequence_parser.map(to_mapping)
-
-

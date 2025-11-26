@@ -14,6 +14,7 @@ from .errors import ParseError
 from .models import ParsableModel
 from .fields import ParseField
 from .config import ParseConfig
+from .builder import parser_builder
 from .generator import build_model_parser, generate_field_parser
 from .parsers import (
     any_char,
@@ -32,6 +33,7 @@ __all__: list[str] = [
     "ParseConfig",
     "build_model_parser",
     "generate_field_parser",
+    "parser_builder",
     "literal",
     "pattern",
     "integer",

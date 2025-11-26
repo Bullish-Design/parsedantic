@@ -73,9 +73,7 @@ class ParsableModel(BaseModel):
         parser = cls._get_parser()
         try:
             parsed_data = parser.parse(text)
-        except (
-            ParsyParseError
-        ) as exc:  # pragma: no cover - behaviour via ParseError tests
+        except ParsyParseError as exc:  # pragma: no cover - behaviour via ParseError tests
             # ``ParseError`` expects the original text, a character index and an
             # expected-description string. parsy's ``ParseError`` exposes
             # ``index`` and ``expected`` attributes; we fall back gracefully if
@@ -96,64 +94,64 @@ class ParsableModel(BaseModel):
 
     @classmethod
     def _get_parser(cls: Type[SelfParsableModel]) -> Parser[Any]:
-        """Return a cached parser for *cls*, building it on first use.
-
-        The parser is cached per concrete subclass to avoid the overhead of
-        regenerating parsers on every :meth:`parse` call. This method is
-        thread-safe and emits debug logs indicating whether a cached parser
-        was used or a new one was built.
-
-        For recursive models we use :func:`parsy.forward_declaration` so that
-        nested references to the same model (or mutually recursive models)
-        can obtain a placeholder parser while the real parser is being built.
-        """
-        placeholder: Parser[Any] | None = None
-        with cls._parser_cache_lock:
-            parser = cls._parser_cache.get(cls)
-            if parser is None:
-                logger.debug("Building new parser for %s", cls.__name__)
-                placeholder = forward_declaration()
-                cls._parser_cache[cls] = placeholder
-            else:
-                logger.debug("Using cached parser for %s", cls.__name__)
-                return parser
-
-        # Build the real parser outside the lock
-        built = cls._build_parser()
-
-        with cls._parser_cache_lock:
-            current = cls._parser_cache.get(cls)
-            # If the cache still contains our placeholder, finalise it.
-            if placeholder is not None and current is placeholder:
-                placeholder.become(built)
+            """Return a cached parser for *cls*, building it on first use.
+    
+            The parser is cached per concrete subclass to avoid the overhead of
+            regenerating parsers on every :meth:`parse` call. This method is
+            thread-safe and emits debug logs indicating whether a cached parser
+            was used or a new one was built.
+    
+            For recursive models we use :func:`parsy.forward_declaration` so that
+            nested references to the same model (or mutually recursive models)
+            can obtain a placeholder parser while the real parser is being built.
+            """
+            placeholder: Parser[Any] | None = None
+            with cls._parser_cache_lock:
+                parser = cls._parser_cache.get(cls)
+                if parser is None:
+                    logger.debug("Building new parser for %s", cls.__name__)
+                    placeholder = forward_declaration()
+                    cls._parser_cache[cls] = placeholder
+                else:
+                    logger.debug("Using cached parser for %s", cls.__name__)
+                    return parser
+    
+            # Build the real parser outside the lock
+            built = cls._build_parser()
+    
+            with cls._parser_cache_lock:
+                current = cls._parser_cache.get(cls)
+                # If the cache still contains our placeholder, finalise it.
+                if placeholder is not None and current is placeholder:
+                    placeholder.become(built)
+                    cls._parser_cache[cls] = built
+                    return built
+    
+                # Another thread may have populated the cache while we built.
+                # In that case, prefer the cached instance.
+                if current is not None:
+                    return current
+    
+                # Fallback: store and return the built parser.
                 cls._parser_cache[cls] = built
                 return built
-
-            # Another thread may have populated the cache while we built.
-            # In that case, prefer the cached instance.
-            if current is not None:
-                return current
-
-            # Fallback: store and return the built parser.
-            cls._parser_cache[cls] = built
-            return built
-
+    
     @classmethod
     def _clear_parser_cache(cls) -> None:
-        """Clear the cached parser for this class.
-
-        Primarily intended for tests and benchmarks where parser construction
-        needs to be forced on subsequent calls.
-        """
-        with cls._parser_cache_lock:
-            cls._parser_cache.pop(cls, None)
-
+            """Clear the cached parser for this class.
+    
+            Primarily intended for tests and benchmarks where parser construction
+            needs to be forced on subsequent calls.
+            """
+            with cls._parser_cache_lock:
+                cls._parser_cache.pop(cls, None)
+    
     @classmethod
     def _build_parser(cls: Type[SelfParsableModel]) -> Parser[Any]:
-        """Build a parsy ``Parser`` for *cls*.
-
-        The default implementation delegates to :func:`build_model_parser`,
-        which uses type annotations (and later, ``ParseField`` metadata) to
-        construct a parser for the model.
-        """
-        return build_model_parser(cls)
+            """Build a parsy ``Parser`` for *cls*.
+    
+            The default implementation delegates to :func:`build_model_parser`,
+            which uses type annotations (and later, ``ParseField`` metadata) to
+            construct a parser for the model.
+            """
+            return build_model_parser(cls)
