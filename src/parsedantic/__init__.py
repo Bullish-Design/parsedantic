@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .core import Parser
 from .errors import ParseError
+from .model import ParsableModel
 from .primitives import (
     any_char,
     char_from,
@@ -33,6 +34,7 @@ __all__ = [
     "Parser",
     "Parsed",
     "ParseError",
+    "ParsableModel",
     "literal",
     "pattern",
     "string_of",
