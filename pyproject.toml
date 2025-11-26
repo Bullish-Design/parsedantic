@@ -1,27 +1,36 @@
-[build-system]
-requires = ["hatchling>=1.0"]
-build-backend = "hatchling.build"
-
+# /mnt/data/pyproject.toml
 [project]
 name = "parsedantic"
-version = "0.1.0"
-description = "Pydantic-native wrapper for parsy parser combinators."
+version = "2.0.0"
+description = "Parser combinators with deep Pydantic integration"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.10",
     "parsy>=2.1",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "mypy>=1.8",
-    "ruff>=0.1",
-]
+dev = ["pytest", "mypy", "ruff", "pydantic>=2.10", "parsy>=2.1"]
 
-#[tool.uv.scripts]
-#test = "pytest"
-#lint = "ruff check"
-#format = "ruff format"
-#typecheck = "mypy src/"
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+plugins = ["pydantic.mypy"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
