@@ -61,3 +61,28 @@ def test_parse_error_edge_cases_do_not_crash(text: str, index: int) -> None:
     msg = str(err)
     assert "ParseError" in msg
     assert "^" in msg.splitlines()[-1]
+
+
+from parsedantic import ParsableModel
+
+
+def test_model_parse_failure_includes_field_name() -> None:
+    """Model.parse should surface the field name in error messages.
+
+    This exercises the integration between model-level parsing, the generator
+    and :class:`ParseError`.
+    """
+
+    class Model(ParsableModel):
+        x: int
+        y: str
+
+    with pytest.raises(ParseError) as excinfo:
+        Model.parse("not_an_int hello")
+
+    message = str(excinfo.value)
+    # We do not assert on the *exact* message wording, only that it carries
+    # both location information and the field context.
+    assert "line 1" in message
+    assert "column" in message
+    assert "field 'x'" in message

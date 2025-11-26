@@ -33,7 +33,6 @@ __all__: list[str] = [
     "ParseConfig",
     "build_model_parser",
     "generate_field_parser",
-    "parser_builder",
     "literal",
     "pattern",
     "integer",

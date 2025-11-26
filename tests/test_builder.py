@@ -1,16 +1,14 @@
 # tests/test_builder.py
 from __future__ import annotations
 
-"""Tests for the :func:`parser_builder` decorator (Step 15).
+import pytest
 
-These tests exercise the generator-style parser construction for complex
-patterns that do not fit the declarative, field-driven model.
-"""
-
-from parsedantic import ParsableModel, any_char, literal, parser_builder, pattern
+from parsedantic import ParsableModel, ParseError, parser_builder, literal, pattern, any_char
 
 
 class TestParserBuilder:
+    """Tests for the @parser_builder decorator on ParsableModel subclasses."""
+
     def test_parser_builder_decorator(self) -> None:
         """Test @parser_builder for complex parsing (Hollerith-style)."""
 
@@ -26,6 +24,7 @@ class TestParserBuilder:
                 return {"content": "".join(chars)}
 
         result = Hollerith.parse("5Hhello")
+        assert isinstance(result, Hollerith)
         assert result.content == "hello"
 
     def test_parser_builder_overrides_fields(self) -> None:
@@ -43,3 +42,15 @@ class TestParserBuilder:
 
         result = Model.parse("X")
         assert result.x == 99
+
+    def test_parser_builder_invalid_usage_raises(self) -> None:
+        """Non-generator functions should be rejected early."""
+
+        with pytest.raises(TypeError):
+
+            @parser_builder
+            def not_a_generator():
+                return 1  # pragma: no cover - should never be called
+
+            # Force binding/usage so that decorator is exercised
+            _ = not_a_generator

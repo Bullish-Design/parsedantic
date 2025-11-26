@@ -1,59 +1,42 @@
 # src/parsedantic/models.py
 from __future__ import annotations
 
-"""Core ``ParsableModel`` base class.
-
-This module defines :class:`ParsableModel`, a thin extension of Pydantic's
-``BaseModel`` that adds text parsing capabilities on top of the primitive
-parsers and protocols defined in earlier steps.
-
-Step 4 only provides the skeleton and caching infrastructure. Actual parser
-generation is introduced in later steps.
-"""
-
-from typing import Any, ClassVar, Dict, Type, TypeVar
-
-import logging
-from threading import RLock
+from dataclasses import dataclass
+from typing import Any, ClassVar, Dict, Type, TypeVar, get_type_hints
 
 from parsy import Parser, ParseError as ParsyParseError, forward_declaration
-from pydantic import BaseModel
-
-logger = logging.getLogger(__name__)
-
+from pydantic import BaseModel, ConfigDict, Field  # , PydanticUndefined
+from pydantic.fields import FieldInfo
+from pydantic_core import PydanticUndefined
 from .errors import ParseError
 from .generator import build_model_parser
+from .parsers import whitespace
 
 SelfParsableModel = TypeVar("SelfParsableModel", bound="ParsableModel")
 
 
 class ParsableModel(BaseModel):
-    """Base class for models that can parse themselves from text.
+    """Base class for models that can be parsed from text using parsy.
 
-    Subclasses gain a :meth:`parse` class method that turns an input string
-    into a validated model instance using an underlying parsy ``Parser``. The
-    actual parser construction is delegated to :meth:`_build_parser`, whose
-    result is cached per subclass in :attr:`_parser_cache`.
+    Subclasses define typed fields as normal Pydantic models. At runtime we
+    inspect the annotations to automatically generate a :class:`parsy.Parser`
+    capable of consuming an input string and producing a dictionary suitable
+    for validation via :meth:`BaseModel.model_validate`.
+
+    Parsers are cached per subclass to avoid repeated regeneration.
     """
 
-    #: Cache mapping model classes to their parser instances.
-    _parser_cache: ClassVar[Dict[Type["ParsableModel"], Parser[Any]]] = {}
-    _parser_cache_lock: ClassVar[RLock] = RLock()
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    class ParseConfig:
-        """Default parsing configuration for a model.
+    # Cache of built parsers per concrete model class. We keep this private so
+    # that callers interact only via :meth:`parse` or :meth:`_get_parser`.
+    _parser_cache: ClassVar[Dict[Type["ParsableModel"], Parser]] = {}
 
-        Later steps will make use of these attributes when generating parsers.
-        They are defined here so that user code can start declaring configs
-        early without breaking imports.
-        """
-
-        #: Parser consumed between successive fields, if any.
-        field_separator: Parser[Any] | None = None
-        #: Behaviour for Optional fields; honoured in later steps.
-        strict_optional: bool = True
-        #: Optional whitespace handling parser; used in later steps.
-        whitespace: Parser[Any] | None = None
+    # Forward declaration registry for recursive models. When building a parser
+    # for a model that references itself (directly or indirectly), we create a
+    # placeholder parser that can be used while the real parser is being
+    # constructed.
+    _forward_decls: ClassVar[Dict[Type["ParsableModel"], Parser]] = {}
 
     @classmethod
     def parse(cls: Type[SelfParsableModel], text: str) -> SelfParsableModel:
@@ -73,85 +56,187 @@ class ParsableModel(BaseModel):
         parser = cls._get_parser()
         try:
             parsed_data = parser.parse(text)
-        except ParsyParseError as exc:  # pragma: no cover - behaviour via ParseError tests
-            # ``ParseError`` expects the original text, a character index and an
-            # expected-description string. parsy's ``ParseError`` exposes
-            # ``index`` and ``expected`` attributes; we fall back gracefully if
-            # they are absent for any reason.
-            index = getattr(exc, "index", 0)
-            expected_raw = getattr(exc, "expected", str(exc))
-            # parsy's ``expected`` is often a frozenset; normalise to a compact
-            # human-readable string for our ``ParseError``.
-            if isinstance(expected_raw, (set, frozenset)):
-                expected_str = ", ".join(sorted(map(str, expected_raw)))
-            else:
-                expected_str = str(expected_raw)
-            raise ParseError(text=text, index=index, expected=expected_str) from exc
+        except (
+            ParsyParseError
+        ) as exc:  # pragma: no cover - behaviour via ParseError tests
+            # Delegate conversion of parsy's ``ParseError`` into our public
+            # :class:`ParseError` type so that error formatting lives in a
+            # single place.
+            raise ParseError.from_parsy_error(exc, text) from exc
 
-        # Delegate to Pydantic for full validation. Any ``ValidationError``
-        # raised here is intentionally not wrapped.
         return cls.model_validate(parsed_data)
 
     @classmethod
     def _get_parser(cls: Type[SelfParsableModel]) -> Parser[Any]:
-            """Return a cached parser for *cls*, building it on first use.
-    
-            The parser is cached per concrete subclass to avoid the overhead of
-            regenerating parsers on every :meth:`parse` call. This method is
-            thread-safe and emits debug logs indicating whether a cached parser
-            was used or a new one was built.
-    
-            For recursive models we use :func:`parsy.forward_declaration` so that
-            nested references to the same model (or mutually recursive models)
-            can obtain a placeholder parser while the real parser is being built.
-            """
-            placeholder: Parser[Any] | None = None
-            with cls._parser_cache_lock:
-                parser = cls._parser_cache.get(cls)
-                if parser is None:
-                    logger.debug("Building new parser for %s", cls.__name__)
-                    placeholder = forward_declaration()
-                    cls._parser_cache[cls] = placeholder
-                else:
-                    logger.debug("Using cached parser for %s", cls.__name__)
-                    return parser
-    
-            # Build the real parser outside the lock
-            built = cls._build_parser()
-    
-            with cls._parser_cache_lock:
-                current = cls._parser_cache.get(cls)
-                # If the cache still contains our placeholder, finalise it.
-                if placeholder is not None and current is placeholder:
-                    placeholder.become(built)
-                    cls._parser_cache[cls] = built
-                    return built
-    
-                # Another thread may have populated the cache while we built.
-                # In that case, prefer the cached instance.
-                if current is not None:
-                    return current
-    
-                # Fallback: store and return the built parser.
-                cls._parser_cache[cls] = built
-                return built
-    
-    @classmethod
-    def _clear_parser_cache(cls) -> None:
-            """Clear the cached parser for this class.
-    
-            Primarily intended for tests and benchmarks where parser construction
-            needs to be forced on subsequent calls.
-            """
-            with cls._parser_cache_lock:
-                cls._parser_cache.pop(cls, None)
-    
+        """Return a cached parser for *cls*, building it on first use.
+
+        The parser is cached per concrete subclass to avoid the overhead of
+        regenerating parsers on every :meth:`parse` call. This method is
+        thread-safe and emits debug logs indicating whether a cached parser
+        was used or a new one was built.
+
+        For recursive models we use :func:`parsy.forward_declaration` so that
+        nested references to the same model (or mutually recursive models)
+        can obtain a placeholder parser while the real parser is being built.
+        """
+        # Use an explicit cache lookup so subclasses each get their own parser.
+        if cls in cls._parser_cache:
+            return cls._parser_cache[cls]
+
+        # If we already created a forward declaration for this class (because
+        # we are in the middle of building a recursive structure), return that
+        # placeholder immediately.
+        if cls in cls._forward_decls:
+            return cls._forward_decls[cls]
+
+        # Create a forward declaration and register it before building the
+        # actual parser so that recursive references can use it.
+        placeholder: Parser[Any] = forward_declaration()
+        cls._forward_decls[cls] = placeholder
+
+        parser = cls._build_parser()
+
+        # Once the real parser is available, fulfil the forward declaration and
+        # move the parser into the main cache.
+        placeholder.become(parser)
+        cls._parser_cache[cls] = parser
+        del cls._forward_decls[cls]
+
+        return parser
+
     @classmethod
     def _build_parser(cls: Type[SelfParsableModel]) -> Parser[Any]:
-            """Build a parsy ``Parser`` for *cls*.
-    
-            The default implementation delegates to :func:`build_model_parser`,
-            which uses type annotations (and later, ``ParseField`` metadata) to
-            construct a parser for the model.
-            """
-            return build_model_parser(cls)
+        """Build a new parser for *cls* by inspecting its annotations.
+
+        This method delegates to :func:`parsedantic.generator.build_model_parser`
+        which performs the heavy lifting of analysing field types and generating
+        the appropriate parsy combinators.
+        """
+        return build_model_parser(cls)
+
+    @classmethod
+    def clear_parser_cache(cls) -> None:
+        """Clear all cached parsers for all :class:`ParsableModel` subclasses."""
+        cls._parser_cache.clear()
+        cls._forward_decls.clear()
+
+
+@dataclass
+class ParseFieldMetadata:
+    """Configuration for a single field parsed from text.
+
+    This metadata is attached to Pydantic's :class:`FieldInfo` objects via
+    the ``json_schema_extra`` attribute so that the parser generator can
+    access it when building field parsers.
+    """
+
+    parser: Parser[Any] | None = None
+    pattern: str | None = None
+    sep_by: Parser[Any] | None = None
+
+
+class ParseField(Field):
+    """Custom field function that attaches parsing metadata.
+
+    Usage mirrors :func:`pydantic.Field` but accepts additional keyword
+    arguments:
+
+    * ``parser``: an explicit parsy :class:`Parser` to use for this field
+    * ``pattern``: a regular expression pattern string to match
+    * ``sep_by``: a parser used to separate list elements
+
+    The metadata is stored on the underlying :class:`FieldInfo` so that
+    :func:`parsedantic.generator.generate_field_parser` can inspect it.
+    """
+
+    def __init__(
+        self,
+        default: Any = PydanticUndefined,
+        *,
+        parser: Parser[Any] | None = None,
+        pattern: str | None = None,
+        sep_by: Parser[Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        extra = kwargs.pop("json_schema_extra", {}) or {}
+        extra["parsefield_metadata"] = ParseFieldMetadata(
+            parser=parser,
+            pattern=pattern,
+            sep_by=sep_by,
+        )
+        super().__init__(default=default, json_schema_extra=extra, **kwargs)
+
+
+def get_parsefield_metadata(field_info: FieldInfo) -> ParseFieldMetadata | None:
+    """Extract :class:`ParseFieldMetadata` from a Pydantic :class:`FieldInfo`.
+
+    Returns ``None`` if no parsing metadata has been attached.
+    """
+    extra = field_info.json_schema_extra or {}
+    metadata = extra.get("parsefield_metadata")
+    if isinstance(metadata, ParseFieldMetadata):
+        return metadata
+    return None
+
+
+class ParseConfig(BaseModel):
+    """Configuration options that influence parser generation for a model.
+
+    Instances of this class are intended for use via the ``parse_config``
+    attribute on :class:`ParsableModel` subclasses. For example:
+
+    .. code-block:: python
+
+       class MyModel(ParsableModel):
+           x: int
+           y: int
+
+           parse_config = ParseConfig(field_separator=whitespace())
+
+    Attributes:
+        field_separator:
+            Optional parser that separates top-level fields in the model. When
+            provided, this parser is inserted between each field parser in the
+            generated model parser.
+        strict_optional:
+            When ``True`` (the default), optional fields still raise a
+            :class:`ParseError` if the underlying parser fails. When ``False``,
+            failures are treated as a missing value and the result becomes
+            ``None``.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    field_separator: Parser | None = None
+    strict_optional: bool = True
+    whitespace: Parser | None = None
+
+
+def get_parse_config(model_cls: type[ParsableModel]) -> ParseConfig:
+    """Return the :class:`ParseConfig` associated with *model_cls*.
+
+    If the model defines a ``parse_config`` class attribute it is used
+    directly. Otherwise a default configuration is returned.
+    """
+    config = getattr(model_cls, "parse_config", None)
+    if isinstance(config, ParseConfig):
+        return config
+    return ParseConfig()
+
+
+def iter_model_fields(model_cls: type[ParsableModel]) -> Dict[str, FieldInfo]:
+    """Yield Pydantic :class:`FieldInfo` objects for all model fields.
+
+    This helper is used by the parser generator to obtain field metadata
+    (including :class:`ParseFieldMetadata`) from the model class.
+    """
+    type_hints = get_type_hints(model_cls, include_extras=True)
+    fields: Dict[str, FieldInfo] = {}
+    for name, annotation in type_hints.items():
+        if name.startswith("_"):
+            continue
+        field_info = model_cls.model_fields.get(name)
+        if isinstance(field_info, FieldInfo):
+            fields[name] = field_info
+    return fields
+

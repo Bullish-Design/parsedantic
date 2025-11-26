@@ -1,10 +1,21 @@
 # src/parsedantic/errors.py
 from __future__ import annotations
 
+"""Custom error types used by Parsedantic.
+
+This module currently exposes a single :class:`ParseError` exception that
+wraps failures coming from the underlying parsy parsers and enriches them with
+line/column information and a small source-code style context snippet.
+
+The goal is to provide actionable, implementation-agnostic feedback to callers:
+they should never need to depend on parsy's own :class:`ParseError` type.
+"""
+
 from dataclasses import dataclass
+from typing import Any
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class ParseError(Exception):
     """Parsing failure with source position information.
 
@@ -23,30 +34,53 @@ class ParseError(Exception):
     column: int
 
     def __init__(self, text: str, index: int, expected: str) -> None:
-        # Manual init instead of dataclass-generated one so we can derive line/column.
+        # Manual init so we can derive line/column eagerly.
         self.text = text
         self.index = index
         self.expected = expected
         self.line, self.column = get_line_column(text, index)
-        # We intentionally do not call ``super().__init__`` with a message here.
-        # The string representation is fully controlled by ``__str__`` below and
-        # tests rely only on that.
         Exception.__init__(self)
 
     def __str__(self) -> str:  # pragma: no cover - behaviour tested via tests
         context_line = _get_context_line(self.text, self.line)
         marker_line = " " * (self.column - 1) + "^"
         return (
-            f"ParseError at line {self.line}, column {self.column}: expected {self.expected!r}\n"
-            f"{context_line}\n{marker_line}"
+            f"ParseError at line {self.line}, column {self.column}: "
+            f"expected {self.expected!r}\n"
+            f"{context_line}\n"
+            f"{marker_line}"
         )
+
+    # ------------------------------------------------------------------ #
+    # Helpers
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def from_parsy_error(cls, exc: Exception, text: str) -> "ParseError":
+        """Construct :class:`ParseError` from a parsy ``ParseError``.
+
+        The *exc* object is treated as duck-typed: if it exposes ``index`` and
+        ``expected`` attributes they are used, otherwise sensible fallbacks are
+        chosen. ``expected`` values that are sets are normalised into a stable,
+        comma-separated string.
+        """
+        index = getattr(exc, "index", 0)
+        expected_raw: Any = getattr(exc, "expected", str(exc))
+
+        if isinstance(expected_raw, (set, frozenset)):
+            expected = ", ".join(sorted(map(str, expected_raw)))
+        else:
+            expected = str(expected_raw)
+
+        return cls(text=text, index=index, expected=expected)
 
 
 def get_line_column(text: str, index: int) -> tuple[int, int]:
-    """Translate a character index into one-based (line, column).
+    """Translate a character index into one-based ``(line, column)``.
 
-    The index is clamped into the valid range ``[0, len(text)]``. Lines and columns are
-    both one-based, and line breaks are recognised as ``"\n"`` characters.
+    The index is clamped into the valid range ``[0, len(text)]``. Lines and
+    columns are both one-based, and line breaks are recognised as "\n"
+    characters.
     """
     if index < 0:
         index = 0

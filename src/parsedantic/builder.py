@@ -16,18 +16,15 @@ Typical usage overrides :meth:`ParsableModel._build_parser`::
         @parser_builder
         @classmethod
         def _build_parser(cls):
-            length = yield pattern(r"\\d+").map(int)
+            length = yield pattern(r"\d+").map(int)
             yield literal("H")
             chars = yield any_char.times(length)
             return {"content": "".join(chars)}
 
-The decorated method must be a *generator function* that ``yield`` s parsy
-parsers and finally ``return`` s a mapping suitable for
+The decorated method must be a *generator function* that yields parsy parsers
+and finally returns a mapping suitable for
 :meth:`pydantic.BaseModel.model_validate`.
 
-``@parser_builder`` can be applied either to plain functions or to
-``@classmethod`` methods. In the latter case it preserves the classmethod
-behaviour.
 """
 
 from functools import wraps
@@ -48,7 +45,8 @@ def _wrap_generator_function(func: Callable[..., Any]) -> Callable[..., Parser[A
     """
     if not isgeneratorfunction(func):
         raise TypeError(
-            f"@parser_builder can only be applied to generator functions; got {func!r}"
+            "@parser_builder can only be applied to generator functions; "
+            f"got {func!r}"
         )
 
     @wraps(func)

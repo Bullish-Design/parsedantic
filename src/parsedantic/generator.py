@@ -22,9 +22,10 @@ from typing import (
     TYPE_CHECKING,
     Union,
     Literal,
+    ForwardRef,
     get_args,
     get_origin,
-    get_type_hints,
+    get_type_hints,  # <-- add this
 )
 
 import logging
@@ -348,21 +349,25 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[Dict[str, A
 
         # When we have separator chars, we can't safely cache string parsers
         if separator_chars and base_type is str:
-            parser = generate_field_parser(
+            base_parser = generate_field_parser(
                 base_type, field_info, _separator_chars=separator_chars
             )
         elif base_type in type_parser_cache:
-            parser = type_parser_cache[base_type]
+            base_parser = type_parser_cache[base_type]
         else:
-            parser = generate_field_parser(
+            base_parser = generate_field_parser(
                 base_type, field_info, _separator_chars=separator_chars
             )
             # Only cache if not separator-dependent
             if not (separator_chars and base_type is str):
-                type_parser_cache[base_type] = parser
+                type_parser_cache[base_type] = base_parser
+
+        # Attach a human-friendly description so that parsy's ``expected`` set
+        # carries field context into :class:`ParseError` messages.
+        field_parser = base_parser.desc(f"field '{name}'")
 
         field_names.append(name)
-        base_parsers.append(parser)
+        base_parsers.append(field_parser)
         optional_kinds.append(opt_kind)
 
     # For lenient optional fields, garbage token yields None
