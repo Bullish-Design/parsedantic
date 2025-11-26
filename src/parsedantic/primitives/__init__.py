@@ -12,6 +12,7 @@ from .character import (
     letter,
     digit,
 )
+from .control import eof, fail, index, line_info, peek, success
 
 __all__ = [
     "literal",
@@ -28,4 +29,10 @@ __all__ = [
     "test_item",
     "letter",
     "digit",
+    "success",
+    "fail",
+    "eof",
+    "peek",
+    "index",
+    "line_info",
 ]

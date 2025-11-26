@@ -50,6 +50,14 @@ class Parser(Generic[T]):
 
         return self._parser.parse(text)
 
+    def parse_partial(self, text: str) -> tuple[T, str]:
+        """Parse *text* and return ``(value, remaining_text)``.
+
+        This mirrors :meth:`parsy.Parser.parse_partial` with type information attached.
+        """
+
+        return self._parser.parse_partial(text)
+
     def format(self, value: T) -> str:
         """Format *value* back into text.
 
