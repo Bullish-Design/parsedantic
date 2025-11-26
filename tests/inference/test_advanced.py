@@ -7,19 +7,15 @@ import pytest
 
 from parsedantic import ParsableModel
 from parsedantic.inference import infer_parser
-from parsedantic.inference.inference import _is_literal as is_literal
-from parsedantic.inference.inference import _is_parsable_model as is_parsable_model
+from parsedantic.inference.inference import _is_literal, _is_parsable_model
 
 
 class TestIsLiteral:
     def test_detects_literal_strings(self) -> None:
-        is_lit, values = is_literal(Literal["OK", "ERROR"])
-        assert is_lit is True
-        assert set(values) == {"OK", "ERROR"}
+        assert _is_literal(Literal["OK", "ERROR"]) is True
 
     def test_non_literal_returns_false(self) -> None:
-        is_lit, _ = is_literal(int)
-        assert is_lit is False
+        assert _is_literal(int) is False
 
 
 class TestLiteralInference:
@@ -40,11 +36,11 @@ class TestIsParsableModel:
             x: int
             y: int
 
-        assert is_parsable_model(Point) is True
+        assert _is_parsable_model(Point) is True
 
     def test_rejects_non_model(self) -> None:
-        assert is_parsable_model(int) is False
-        assert is_parsable_model(str) is False
+        assert _is_parsable_model(int) is False
+        assert _is_parsable_model(str) is False
 
 
 class TestNestedModelInference:

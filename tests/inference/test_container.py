@@ -6,35 +6,25 @@ from typing import Optional
 import pytest
 
 from parsedantic.inference import infer_parser
-from parsedantic.inference.inference import _is_list as is_list
-from parsedantic.inference.inference import _is_optional as is_optional
-from parsedantic.inference.inference import _is_union as is_union
+from parsedantic.inference.inference import _is_list, _is_optional, _is_union
 
 
 class TestIsOptional:
     def test_detects_optional(self) -> None:
-        is_opt, inner = is_optional(Optional[int])
-        assert is_opt is True
-        assert inner is int
+        assert _is_optional(Optional[int]) is True
 
     def test_detects_pipe_none(self) -> None:
-        is_opt, inner = is_optional(int | None)
-        assert is_opt is True
-        assert inner is int
+        assert _is_optional(int | None) is True
 
 
 class TestIsUnion:
     def test_detects_union(self) -> None:
-        is_un, members = is_union(int | str)
-        assert is_un is True
-        assert set(members) == {int, str}
+        assert _is_union(int | str) is True
 
 
 class TestIsList:
     def test_detects_list_with_type(self) -> None:
-        is_lst, elem = is_list(list[int])
-        assert is_lst is True
-        assert elem is int
+        assert _is_list(list[int]) is True
 
 
 class TestInferContainer:
@@ -47,7 +37,6 @@ class TestInferContainer:
     def test_union_int_str(self) -> None:
         parser = infer_parser(int | str)
         assert parser is not None
-
         result = parser.parse("42")
         assert result == 42
         assert isinstance(result, int)

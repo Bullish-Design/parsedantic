@@ -2,101 +2,40 @@
 from __future__ import annotations
 
 from types import NoneType, UnionType
-from typing import TYPE_CHECKING, Any, List, Literal, Union, get_args, get_origin
+from typing import Any, List, Literal, Union, get_args, get_origin
 
 from ..core.parser import Parser
-from ..primitives import float_num, integer, string_of, whitespace
+from ..primitives import float_num, integer, literal, string_of, whitespace
 from ..types import extract_parser
-
-if TYPE_CHECKING:
-    from ..model.base import ParsableModel
 
 
 def get_parser_for_field(annotation: Any) -> Parser | None:
-    """Get parser for field - checks explicit Parsed[] first, then infers.
-
-    Priority:
-    1. Explicit Parsed[T, parser] annotation
-    2. Inferred from type
-    """
+    """Get parser: explicit Parsed[] has priority, then inference."""
     explicit = extract_parser(annotation)
-    if explicit is not None:
-        return explicit
-
-    return infer_parser(annotation)
+    return explicit if explicit is not None else infer_parser(annotation)
 
 
 def infer_parser(annotation: Any) -> Parser | None:
-    """Infer parser from type annotation.
+    """Infer parser from type annotation."""
+    # Literal
+    if _is_literal(annotation):
+        return _build_literal_parser(annotation)
 
-    Handles all supported types in priority order:
-    - Literal["value", ...]
-    - ParsableModel (nested models)
-    - Optional[T]
-    - Union[A, B, ...]
-    - list[T]
-    - Basic types: int, str, float
-    """
-    # Literal types
-    is_lit, values = _is_literal(annotation)
-    if is_lit:
-        if not values:
-            raise TypeError("Literal[...] must specify at least one value")
-        if not all(isinstance(v, str) for v in values):
-            raise TypeError("Literal types currently only support string values")
-
-        from ..primitives import literal
-
-        result = literal(values[0])
-        for value in values[1:]:
-            result = result | literal(value)
-        return result
-
-    # ParsableModel (nested models)
+    # ParsableModel (nested)
     if _is_parsable_model(annotation):
-        from ..model.parser_builder import build_model_parser
+        return _build_model_parser(annotation)
 
-        nested_parser = build_model_parser(annotation)
+    # Optional
+    if _is_optional(annotation):
+        return _build_optional_parser(annotation)
 
-        def to_model(data: dict) -> Any:
-            return annotation.model_validate(data)
+    # Union
+    if _is_union(annotation):
+        return _build_union_parser(annotation)
 
-        def format_model(instance: Any) -> str:
-            return instance.to_text()
-
-        return Parser(
-            nested_parser._parser.map(to_model),
-            formatter=format_model,
-        )
-
-    # Optional[T]
-    is_opt, inner = _is_optional(annotation)
-    if is_opt:
-        inner_parser = infer_parser(inner)
-        if inner_parser:
-            return inner_parser.optional()
-        return None
-
-    # Union[A, B, ...]
-    is_union, members = _is_union(annotation)
-    if is_union:
-        parsers = [infer_parser(m) for m in members]
-        if all(p is not None for p in parsers):
-            combined = parsers[0]
-            for p in parsers[1:]:
-                combined = combined | p
-            return combined
-        return None
-
-    # list[T]
-    is_list, element_type = _is_list(annotation)
-    if is_list:
-        if element_type is None:
-            raise TypeError("list fields must specify element type, e.g. list[int]")
-        element_parser = infer_parser(element_type)
-        if element_parser:
-            return element_parser.sep_by(whitespace())
-        return None
+    # list
+    if _is_list(annotation):
+        return _build_list_parser(annotation)
 
     # Basic types
     if annotation is int:
@@ -109,67 +48,116 @@ def infer_parser(annotation: Any) -> Parser | None:
     return None
 
 
-def _is_literal(annotation: Any) -> tuple[bool, tuple]:
-    """Check if annotation is Literal[...]."""
-    origin = get_origin(annotation)
-    if origin is Literal:
-        return True, get_args(annotation)
-    return False, ()
+# Type checkers (return bool for internal use)
+def _is_literal(annotation: Any) -> bool:
+    return get_origin(annotation) is Literal
+
+
+# def _is_parsable_model(annotation: Any) -> bool:
+#     """Duck typing to avoid circular import."""
+#     return (
+#         isinstance(annotation, type) and
+#         hasattr(annotation, 'from_text') and
+#         hasattr(annotation, 'to_text') and
+#         hasattr(annotation, 'model_fields')
+#     )
 
 
 def _is_parsable_model(annotation: Any) -> bool:
-    """Check if annotation is a ParsableModel subclass."""
+    """Check if ParsableModel using only Pydantic's model_fields."""
     if not isinstance(annotation, type):
         return False
 
-    try:
-        from ..model.base import ParsableModel
+    # Only check model_fields - all Pydantic models have this
+    # But ParsableModel adds from_text, so check that too
+    has_fields = hasattr(annotation, "model_fields")
+    has_from_text = hasattr(annotation, "from_text")
 
-        return issubclass(annotation, ParsableModel)
-    except (TypeError, ImportError):
-        return False
+    # Debug: uncomment to see what's happening
+    # print(f"Checking {annotation}: model_fields={has_fields}, from_text={has_from_text}")
+
+    return has_fields and has_from_text
 
 
-def _is_optional(annotation: Any) -> tuple[bool, Any]:
-    """Check if annotation is Optional[T] or T | None."""
+def _is_optional(annotation: Any) -> bool:
     origin = get_origin(annotation)
     if origin not in (Union, UnionType):
-        return False, None
-
+        return False
     args = get_args(annotation)
     non_none = [arg for arg in args if arg is not NoneType]
-    none_count = len(args) - len(non_none)
-
-    if none_count >= 1 and non_none:
-        if len(non_none) == 1:
-            return True, non_none[0]
-        return True, Union[tuple(non_none)]
-
-    return False, None
+    return len(args) - len(non_none) >= 1 and len(non_none) >= 1
 
 
-def _is_union(annotation: Any) -> tuple[bool, tuple]:
-    """Check if annotation is Union[A, B, ...] (excluding None)."""
+def _is_union(annotation: Any) -> bool:
     origin = get_origin(annotation)
     if origin not in (Union, UnionType):
-        return False, ()
-
-    members = tuple(arg for arg in get_args(annotation) if arg is not NoneType)
-    if len(members) > 1:
-        return True, members
-
-    return False, ()
+        return False
+    members = [arg for arg in get_args(annotation) if arg is not NoneType]
+    return len(members) > 1
 
 
-def _is_list(annotation: Any) -> tuple[bool, Any]:
-    """Check if annotation is list[T]."""
+def _is_list(annotation: Any) -> bool:
     origin = get_origin(annotation)
+    return origin is list or origin is List or annotation is list or annotation is List
 
-    if origin is list or origin is List:
-        args = get_args(annotation)
-        return True, (args[0] if args else None)
 
-    if annotation is list or annotation is List:
-        return True, None
+# Parser builders
+def _build_literal_parser(annotation: Any) -> Parser:
+    values = get_args(annotation)
+    if not values:
+        raise TypeError("Literal[...] must specify at least one value")
+    if not all(isinstance(v, str) for v in values):
+        raise TypeError("Literal types currently only support string values")
 
-    return False, None
+    result = literal(values[0])
+    for value in values[1:]:
+        result = result | literal(value)
+    return result
+
+
+def _build_model_parser(annotation: Any) -> Parser:
+    from ..model.parser_builder import build_model_parser
+
+    nested_parser = build_model_parser(annotation)
+
+    def to_model(data: dict) -> Any:
+        return annotation.model_validate(data)
+
+    def format_model(instance: Any) -> str:
+        return instance.to_text()
+
+    return Parser(
+        nested_parser._parser.map(to_model),
+        formatter=format_model,
+    )
+
+
+def _build_optional_parser(annotation: Any) -> Parser | None:
+    args = get_args(annotation)
+    non_none = [arg for arg in args if arg is not NoneType]
+    inner = non_none[0] if len(non_none) == 1 else Union[tuple(non_none)]
+    inner_parser = infer_parser(inner)
+    return inner_parser.optional() if inner_parser else None
+
+
+def _build_union_parser(annotation: Any) -> Parser | None:
+    members = [arg for arg in get_args(annotation) if arg is not NoneType]
+    parsers = [infer_parser(m) for m in members]
+    if not all(parsers):
+        return None
+    combined = parsers[0]
+    for p in parsers[1:]:
+        combined = combined | p
+    return combined
+
+
+def _build_list_parser(annotation: Any) -> Parser:
+    args = get_args(annotation)
+    element_type = args[0] if args else None
+    if element_type is None:
+        raise TypeError("list fields must specify element type, e.g. list[int]")
+    element_parser = infer_parser(element_type)
+    if not element_parser:
+        raise TypeError(f"Cannot infer parser for list element type {element_type}")
+    return element_parser.sep_by(whitespace())
+
