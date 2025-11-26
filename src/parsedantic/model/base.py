@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from ..errors import ParseError, convert_parsy_error
 from .parser_builder import build_model_parser
+from .serializer import serialize_model
 
 
 class ParsableModel(BaseModel):
@@ -20,10 +21,8 @@ class ParsableModel(BaseModel):
         try:
             data = parser.parse(text)
         except ParseError:
-            # Already a converted parse error, just propagate
             raise
         except Exception as exc:  # pragma: no cover - defensive
-            # Convert any parsing-related error to our ParseError
             raise convert_parsy_error(exc, text) from exc
 
         return cls.model_validate(data)
@@ -41,3 +40,7 @@ class ParsableModel(BaseModel):
             raise convert_parsy_error(exc, text) from exc
 
         return cls.model_validate(data), remainder
+
+    def to_text(self) -> str:
+        """Serialize model to text."""
+        return serialize_model(self)
