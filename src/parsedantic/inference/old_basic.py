@@ -27,7 +27,9 @@ def get_parser_for_field(annotation: Any) -> Parser | None:
     if explicit is not None:
         return explicit
 
-    # Use container inference (which includes basic types as fallback)
-    from .container import infer_parser as infer_container
+    ## Use container inference (which includes basic types as fallback)
+    # from .container import infer_parser as infer_container
 
-    return infer_container(annotation)
+    from . import infer_parser as package_infer_parser
+
+    return package_infer_parser(annotation)
