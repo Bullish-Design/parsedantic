@@ -17,9 +17,13 @@ def build_model_parser(model_class: type["ParsableModel"]) -> Parser[dict[str, A
     """Build parser from model schema."""
     try:
         hints = get_type_hints(model_class)
-    except NameError as exc:
-        # Unresolved forward reference in annotations
-        raise TypeError(f"Unresolved forward reference in {model_class.__name__}: {exc}") from exc
+    # except NameError as exc:
+    #    # Unresolved forward reference in annotations
+    #    raise TypeError(f"Unresolved forward reference in {model_class.__name__}: {exc}") from exc
+    except NameError:
+        # Forward references couldn't be resolved (e.g., locally-defined classes)
+        # Use raw annotations - if they're actual types, they'll work
+        hints = dict(getattr(model_class, "__annotations__", {}))
     except Exception:
         # Fallback for any other issues resolving type hints
         hints = getattr(model_class, "__annotations__", {})
