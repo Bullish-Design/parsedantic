@@ -49,9 +49,13 @@ class Parser(Generic[T]):
 
     # Sequencing methods
 
+    # def then(self, other: Parser[U]) -> Parser[U]:
+    #     """Parse this, then other, return other's result."""
+    #     return Parser(self._parser.then(other._parser))
+
     def then(self, other: Parser[U]) -> Parser[U]:
         """Parse this, then other, return other's result."""
-        return Parser(self._parser.then(other._parser))
+        return Parser(self._parser.then(other._parser), formatter=other._formatter)
 
     def skip(self, other: Parser[Any]) -> Parser[T]:
         """Parse this, then other, return this result."""
