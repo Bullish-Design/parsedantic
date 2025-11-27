@@ -30,7 +30,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, get_type_hints
 
+import parsy
+
 from .core.parser import Parser
+from .config import get_field_separator
 from .inference import get_parser_for_field
 from .model.separator import get_separator_string
 
@@ -61,6 +64,8 @@ class TextCodec:
 
         # Extract configuration once
         self.separator_str = get_separator_string(model_class)
+        # Parser version of separator (used for parsing)
+        self.separator_parser = get_field_separator(model_class)
 
         # Build parsers once (expensive operation)
         self.field_parsers = self._build_field_parsers()
@@ -110,14 +115,36 @@ class TextCodec:
 
         return field_parsers
     def _build_combined_parser(self) -> Parser:
-        """Combine field parsers into single parser.
+        """Combine field parsers into single dict-producing parser.
 
-        Why separate method: This logic will eventually move from parser_builder.py.
-        For now, we delegate to the existing function.
+        This replaces the old ``build_model_parser`` helper and keeps the
+        logic close to where configuration and field parsers live.
         """
-        # Import here to avoid circular dependency during transition
-        from .model.parser_builder import build_model_parser
-        return build_model_parser(self.model_class)
+        # No fields: parser that always returns empty dict
+        if not self.field_parsers:
+            return Parser(parsy.success({}))
+
+        separator = self.separator_parser
+        field_parsers = self.field_parsers
+
+        # Build sequence: field1, sep, field2, sep, field3, ...
+        parsers = [field_parsers[0][1]._parser]
+        for _, field_parser in field_parsers[1:]:
+            parsers.append(separator._parser)
+            parsers.append(field_parser._parser)
+
+        # Combine with parsy.seq
+        parsy_parser = parsy.seq(*parsers)
+
+        # Convert tuple result to dict of field_name -> value
+        def to_dict(values: tuple) -> dict[str, Any]:
+            # Extract field values (skip separators at odd indices)
+            field_values = [values[i] for i in range(0, len(values), 2)]
+            field_names = [name for name, _ in field_parsers]
+            return dict(zip(field_names, field_values))
+
+        return Parser(parsy_parser.map(to_dict))
+
 
     def parse(self, text: str) -> "ParsableModel":
         """Parse text into validated model instance.
