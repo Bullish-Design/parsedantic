@@ -1,6 +1,8 @@
 # src/parsedantic/__init__.py
 from __future__ import annotations
 
+from pydantic import ConfigDict
+
 from .core import Parser
 from .errors import ParseError
 from .model import ParsableModel
@@ -35,6 +37,7 @@ __all__ = [
     "Parsed",
     "ParseError",
     "ParsableModel",
+    "ConfigDict",
     "literal",
     "pattern",
     "string_of",
