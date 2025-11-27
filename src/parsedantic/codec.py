@@ -66,22 +66,35 @@ class TextCodec:
         self.field_parsers = self._build_field_parsers()
         self.combined_parser = self._build_combined_parser()
 
+
     def _build_field_parsers(self) -> list[tuple[str, Parser]]:
         """Build parser for each field.
 
-        Why separate method: Keeps initialization logic organized.
-        This will eventually replace logic in parser_builder.py.
+        Strategy:
+        - Prefer Pydantic's resolved ``field_info.annotation``.
+        - Fall back to evaluated type hints only when needed.
+
+        Using ``field_info.annotation`` avoids issues with
+        ``from __future__ import annotations`` where ``__annotations__``
+        may contain strings instead of real types.
         """
         try:
-            hints = get_type_hints(self.model_class)
+            # Use include_extras to preserve Annotated/Parsed metadata
+            hints = get_type_hints(self.model_class, include_extras=True)  # type: ignore[call-arg]
         except Exception:
-            hints = getattr(self.model_class, "__annotations__", {})
+            hints = {}
 
         fields = self.model_class.model_fields
         field_parsers: list[tuple[str, Parser]] = []
 
         for field_name, field_info in fields.items():
-            annotation = hints.get(field_name, field_info.annotation)
+            # Start with Pydantic's resolved annotation
+            annotation = getattr(field_info, "annotation", None)
+
+            # If annotation is missing or very generic, try type hints
+            if annotation is None or annotation is Any:
+                annotation = hints.get(field_name, annotation)
+
             parser = get_parser_for_field(annotation)
 
             if parser is None:
@@ -90,13 +103,12 @@ class TextCodec:
                     f"with type {annotation}"
                 )
 
-            if field_info.description:
+            if getattr(field_info, "description", None):
                 parser = parser.desc(field_info.description)
 
             field_parsers.append((field_name, parser))
 
         return field_parsers
-
     def _build_combined_parser(self) -> Parser:
         """Combine field parsers into single parser.
 
