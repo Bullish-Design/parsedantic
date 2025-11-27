@@ -1,37 +1,41 @@
 # src/parsedantic/model/serializer.py
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, get_type_hints
-
-from ..inference import get_parser_for_field
-from .separator import get_separator_string  # NEW IMPORT
+from typing import TYPE_CHECKING
+import warnings
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from .base import ParsableModel
+    from ..codec import TextCodec  # for type checkers only
 
 
 def serialize_model(model: "ParsableModel") -> str:
-    """Serialize model to text using field parsers and configured separator."""
+    """Serialize a model instance to text.
+
+    DEPRECATED: This helper is kept for backwards compatibility only.
+
+    New code should call :meth:`ParsableModel.to_text` on the instance or use
+    :class:`parsedantic.codec.TextCodec` directly instead. Internally this
+    function simply forwards to the model's text codec so that there is a
+    single source of truth for serialization behaviour.
+    """
+    # Local import to avoid an import cycle at module import time
+    from ..codec import TextCodec
+
+    warnings.warn(
+        "serialize_model is deprecated. Use instance.to_text() or "
+        "TextCodec(type(instance)).serialize(instance) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     model_cls = type(model)
-    try:
-        hints = get_type_hints(model_cls)
-    except Exception:  # pragma: no cover - fallback path
-        hints = getattr(model_cls, "__annotations__", {})
 
-    fields = model_cls.model_fields
-    parts: list[str] = []
+    # Prefer the cached codec used by ParsableModel if available.
+    get_codec = getattr(model_cls, "_get_codec", None)
+    if callable(get_codec):
+        codec = get_codec()  # type: ignore[misc]
+    else:
+        codec = TextCodec(model_cls)  # type: ignore[arg-type]
 
-    for field_name, field_info in fields.items():
-        annotation = hints.get(field_name, field_info.annotation)
-        parser = get_parser_for_field(annotation)
-
-        if parser is None:
-            raise TypeError(f"Cannot serialize field '{field_name}' - no parser available")
-
-        value = getattr(model, field_name)
-        formatted = parser.format(value)
-        parts.append(formatted)
-
-    # Use helper function instead of hardcoded space
-    separator = get_separator_string(model_cls)
-    return separator.join(parts)
+    return codec.serialize(model)

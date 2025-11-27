@@ -115,10 +115,40 @@ def _build_literal_parser(annotation: Any) -> Parser:
     return result
 
 
-def _build_model_parser(annotation: Any) -> Parser:
-    from ..model.parser_builder import build_model_parser
+# def _build_model_parser(annotation: Any) -> Parser:
+#     from ..model.parser_builder import build_model_parser
 
-    nested_parser = build_model_parser(annotation)
+#     nested_parser = build_model_parser(annotation)
+
+#     def to_model(data: dict) -> Any:
+#         return annotation.model_validate(data)
+
+#     def format_model(instance: Any) -> str:
+#         return instance.to_text()
+
+#     return Parser(
+#         nested_parser._parser.map(to_model),
+#         formatter=format_model,
+#     )
+
+def _build_model_parser(annotation: Any) -> Parser:
+    """Build a parser for a nested ParsableModel.
+
+    This now goes through the model's TextCodec directly instead of the
+    deprecated ``build_model_parser`` helper, which avoids emitting the
+    deprecation warning used for backwards compatibility.
+    """
+    # Prefer a cached codec if the model exposes the helper used by ParsableModel.
+    get_codec = getattr(annotation, "_get_codec", None)
+    if callable(get_codec):
+        codec = get_codec()  # type: ignore[misc]
+    else:
+        # Fallback for non-ParsableModel-like types that might still reach here.
+        from ..codec import TextCodec  # local import to avoid import cycles
+
+        codec = TextCodec(annotation)  # type: ignore[arg-type]
+
+    nested_parser = codec.combined_parser
 
     def to_model(data: dict) -> Any:
         return annotation.model_validate(data)
@@ -130,7 +160,6 @@ def _build_model_parser(annotation: Any) -> Parser:
         nested_parser._parser.map(to_model),
         formatter=format_model,
     )
-
 
 def _build_optional_parser(annotation: Any) -> Parser | None:
     args = get_args(annotation)

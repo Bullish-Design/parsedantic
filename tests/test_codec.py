@@ -60,3 +60,26 @@ class TestTextCodecBasic:
         model = CSV(a=1, b=2)
         text = codec.serialize(model)
         assert text == "1,2"
+
+
+class TestTextCodecFieldIntrospection:
+    def test_field_introspection(self) -> None:
+        """Codec should support field-level parser access and helpers."""
+
+        class Point(ParsableModel):
+            x: int
+            y: int
+
+        # Use the same codec that ParsableModel caches internally
+        codec = Point._get_codec()
+
+        x_parser = codec.get_field_parser("x")
+        assert x_parser is not None
+
+        # Parse a single field
+        value = codec.parse_field("x", "42")
+        assert value == 42
+
+        # Format a single field
+        text = codec.format_field("y", 100)
+        assert text == "100"

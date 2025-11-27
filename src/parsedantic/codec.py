@@ -185,3 +185,35 @@ class TextCodec:
             for field_name, parser in self.field_parsers
         ]
         return self.separator_str.join(parts)
+    def get_field_parser(self, field_name: str) -> Parser | None:
+        """Return the parser for a specific field, if available.
+
+        Useful for debugging, testing and tooling that want to work with
+        a single field rather than the full model.
+        """
+        for name, parser in self.field_parsers:
+            if name == field_name:
+                return parser
+        return None
+
+    def parse_field(self, field_name: str, text: str) -> Any:
+        """Parse ``text`` as the value of a single field.
+
+        This uses the same parser that would be used when parsing the full
+        model, but operates on a single value in isolation.
+        """
+        parser = self.get_field_parser(field_name)
+        if parser is None:  # pragma: no cover - defensive
+            raise ValueError(f"No parser found for field '{field_name}'")
+        return parser.parse(text)
+
+    def format_field(self, field_name: str, value: Any) -> str:
+        """Format a single field value using its parser.
+
+        This mirrors how :meth:`serialize` formats values for output but
+        focuses on one field at a time.
+        """
+        parser = self.get_field_parser(field_name)
+        if parser is None:  # pragma: no cover - defensive
+            raise ValueError(f"No parser found for field '{field_name}'")
+        return parser.format(value)
