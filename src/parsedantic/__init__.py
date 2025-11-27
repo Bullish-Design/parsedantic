@@ -6,6 +6,7 @@ from pydantic import ConfigDict
 from .core import Parser
 from .errors import ParseError
 from .model import ParsableModel
+from .generator import generate
 from .primitives import (
     any_char,
     char_from,
@@ -37,6 +38,7 @@ __all__ = [
     "Parsed",
     "ParseError",
     "ParsableModel",
+    "generate",
     "ConfigDict",
     "literal",
     "pattern",
