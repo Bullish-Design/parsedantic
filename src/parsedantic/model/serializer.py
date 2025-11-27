@@ -4,17 +4,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, get_type_hints
 
 from ..inference import get_parser_for_field
+from .separator import get_separator_string  # NEW IMPORT
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from .base import ParsableModel
 
 
 def serialize_model(model: "ParsableModel") -> str:
-    """Serialize model to text using field parsers."""
+    """Serialize model to text using field parsers and configured separator."""
     model_cls = type(model)
     try:
         hints = get_type_hints(model_cls)
-    except Exception:  # pragma: no cover - fallback for unusual cases
+    except Exception:  # pragma: no cover - fallback path
         hints = getattr(model_cls, "__annotations__", {})
 
     fields = model_cls.model_fields
@@ -31,4 +32,6 @@ def serialize_model(model: "ParsableModel") -> str:
         formatted = parser.format(value)
         parts.append(formatted)
 
-    return " ".join(parts)
+    # Use helper function instead of hardcoded space
+    separator = get_separator_string(model_cls)
+    return separator.join(parts)
