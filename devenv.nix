@@ -39,12 +39,6 @@
 
   # devman — the automation plane (CONCEPT.md §5). `base` alone: this repository
   # ships no scheduled work and writes none of its own files.
-  devman = {
-    enable = true;
-    project = "parsedantic";
-    groups = [ "base" ];
-  };
-
   # https://devenv.sh/tasks/
   #
   # base's two names. The group file names a task and never a tool or its
